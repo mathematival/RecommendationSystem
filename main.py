@@ -1,9 +1,7 @@
 import numpy as np
 
 from framework import *
-from models.base_models import *
-# 导入GBDT+LR模型
-from models.gbdt_lr import GBDTLRRecommender
+from models import *
 
 def train_and_predict(config, models_to_run):
     """训练模型并生成预测结果"""
