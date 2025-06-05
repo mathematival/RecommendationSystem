@@ -148,11 +148,23 @@ def main():
     print("实验结果总结")
     print("="*50)
     
-    for result in evaluation_results:
-        print(f"模型: {result['model_name']}")
+    for idx, result in enumerate(evaluation_results):
+        print(f"\n模型: {result['model_name']}")
+        print(f"评估指标:")
         for metric, value in result['metrics'].items():
             print(f"  {metric}: {value:.4f}")
-        print("-" * 30)
+        
+        # 显示性能指标
+        training_result = training_results[idx]
+        training_time = training_result.get('training_time', 0)
+        memory_usage = training_result.get('memory_usage', 0)
+        initial_memory = training_result.get('initial_memory', 0)
+        max_memory = training_result.get('max_memory', 0)
+        
+        print(f"性能指标:")
+        print(f"  训练时间: {training_time:.2f}秒")
+        print(f"  内存消耗: {memory_usage:.2f}MB (初始:{initial_memory:.1f}MB -> 最大:{max_memory:.1f}MB)")
+        print("-" * 50)
 
 if __name__ == "__main__":
     main()

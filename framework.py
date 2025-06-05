@@ -1,8 +1,11 @@
 import numpy as np
+import psutil
 import os
+import time
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Callable, Any, Optional, Union
 from tqdm import tqdm
+import gc
 
 # 复用已有的数据加载函数
 from data_analysis import load_training_data, load_test_data
@@ -273,24 +276,43 @@ class ExperimentRunner:
         self.data_processor = DataProcessor(config)
         self.evaluator = Evaluator(config)
 
+    def get_memory_usage(self) -> float:
+        """获取当前进程的内存使用量(MB)"""
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / 1024 / 1024  # 转换为MB
+
     def run_experiment(self, model_class, model_params=None) -> Dict:
         """运行单个实验"""
         if model_params is None:
             model_params = {}
         
+        # 记录初始内存使用量
+        initial_memory = self.get_memory_usage()
+        max_memory = initial_memory
+        start_time = time.time()
+
         # 加载数据
         train_users, train_items, test_pairs, all_users, all_items = self.data_processor.load_data()
         
         # 如果需要，进行评分归一化
         if self.config.normalize_ratings:
             train_users = self.data_processor.normalize_ratings(train_users)
-            # 重新构建物品评分数据
             train_items = self.data_processor.convert_to_item_ratings(train_users)
         
         # 创建并训练模型
         model = model_class(self.config, **model_params)
         print(f"开始训练 {model.__class__.__name__}...")
+        
+        # 训练模型
         model.fit(train_users, train_items)
+        
+        # 记录训练过程中的最大内存使用量
+        current_memory = self.get_memory_usage()
+        max_memory = max(max_memory, current_memory)
+        
+        # 计算训练时间和内存消耗
+        training_time = time.time() - start_time
+        memory_usage = max_memory - initial_memory
         
         # 预测测试集
         print("开始预测...")
@@ -302,7 +324,11 @@ class ExperimentRunner:
         return {
             "model_name": model.__class__.__name__,
             "num_predictions": len(predictions),
-            "result_file": self.config.result_file_path
+            "result_file": self.config.result_file_path,
+            "training_time": training_time,      # 训练时间(秒)
+            "memory_usage": memory_usage,        # 训练过程中的内存增长量(MB)
+            "max_memory": max_memory,            # 训练过程中的最大内存使用量(MB)
+            "initial_memory": initial_memory     # 初始内存使用量(MB)
         }
         
     def run_experiments(self, models_config: List[Dict]) -> List[Dict]:
@@ -310,6 +336,9 @@ class ExperimentRunner:
         results = []
         
         for model_config in models_config:
+            # 强制进行垃圾回收
+            gc.collect()
+            
             model_class = model_config["class"]
             model_params = model_config.get("params", {})
             config_override = model_config.get("config_override", {})
@@ -329,5 +358,8 @@ class ExperimentRunner:
             results.append(result)
             
             print(f"完成! 结果保存在: {result['result_file']}")
+            
+            # 每个模型测试后也进行垃圾回收
+            gc.collect()
             
         return results
