@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Set, Any
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from typing import Dict
+from sklearn.preprocessing import MinMaxScaler
 import torch
+from torch.utils.data import TensorDataset, DataLoader
 
 from framework import BaseRecommender
 
@@ -14,11 +15,11 @@ class FMRecommender(BaseRecommender):
     相比于传统的线性模型（如LR）具有更强的特征组合能力，尤其适用于稀疏数据场景。
     """
     
-    def __init__(self, config, num_factors=4, learning_rate=0.001, 
-                 regularization=0.01, num_epochs=10, batch_size=256):
+    def __init__(self, config, num_factors=10, learning_rate=0.002, 
+                 regularization=0.005, num_epochs=20, batch_size=1024):
         """初始化FM模型"""
         super().__init__(config)
-        self.num_factors = num_factors       # 隐向量维度（降低以提高稳定性）
+        self.num_factors = num_factors       # 隐向量维度
         self.learning_rate = learning_rate   # 学习率
         self.regularization = regularization # 正则化系数
         self.num_epochs = num_epochs         # 迭代次数
@@ -122,7 +123,6 @@ class FMRecommender(BaseRecommender):
         
         # 对物品特征进行缩放
         item_features = X[['item_mean', 'item_count', 'item_std']].values
-        # 对count特征进行对数变换，减少数值大小差异
         item_features[:, 1] = np.log1p(item_features[:, 1])
         item_features = self.item_feature_scaler.fit_transform(item_features)
         
@@ -131,38 +131,29 @@ class FMRecommender(BaseRecommender):
         
         return X_array, y
     
-    def _fm_prediction(self, x):
-        """
-        FM模型预测函数 - 使用NumPy实现FM计算
+    def fm_forward(self, X_batch):
+        """向量化的FM前向传播计算 - 整批处理"""
+        # 线性项：w0 + w^T x
+        linear_term = self.w0 + torch.matmul(X_batch, self.w)
         
-        优化公式: y = w0 + ∑_i w_i * x_i + 0.5 * ∑_f [(∑_i v_{i,f} * x_i)^2 - ∑_i (v_{i,f} * x_i)^2]
-        """
-        # 线性项
-        linear_term = self.w0 + np.dot(self.w, x)
+        # 交互项计算：1/2 * sum_f [ (sum_i v_i,f*x_i)^2 - sum_i (v_i,f*x_i)^2 ]
+        # 第一项: (sum_i v_i,f * x_i)^2 对所有f求和
+        sum_vx = torch.matmul(X_batch.unsqueeze(1), self.v)
+        sum_vx_square = torch.pow(sum_vx, 2).squeeze(1)
         
-        # 计算特征交互项，使用FM优化公式
-        # 非零特征优化
-        non_zero_indices = np.where(x != 0)[0]
+        # 第二项: sum_i (v_i,f * x_i)^2 对所有f求和
+        X_batch_square = torch.pow(X_batch, 2)
+        v_square = torch.pow(self.v, 2)
+        vx_square_sum = torch.matmul(X_batch_square, v_square)
         
-        # 初始化累加项
-        sum_square_terms = np.zeros(self.num_factors, dtype=np.float32)
-        square_sum_terms = np.zeros(self.num_factors, dtype=np.float32)
+        # 1/2 * (sum_vx_square - vx_square_sum)
+        interaction_term = 0.5 * torch.sum(sum_vx_square - vx_square_sum, dim=1)
         
-        # 计算两个累加项
-        for f in range(self.num_factors):
-            # 只计算非零特征
-            vx = self.v[non_zero_indices, f] * x[non_zero_indices]
-            sum_square_terms[f] = np.sum(vx) ** 2
-            square_sum_terms[f] = np.sum(vx ** 2)
-        
-        # 计算交互项: 1/2 * ∑_f [(∑_i v_i,f*x_i)^2 - ∑_i (v_i,f*x_i)^2]
-        interaction_term = 0.5 * np.sum(sum_square_terms - square_sum_terms)
-        
-        # 返回最终预测值
-        return float(linear_term + interaction_term)
+        # 模型输出 = 线性项 + 交互项
+        return linear_term + interaction_term
     
     def fit(self, train_users: Dict, train_items: Dict) -> None:
-        """训练FM模型，使用PyTorch优化器"""
+        """训练FM模型"""
         print("训练FM模型...")
         super().fit(train_users, train_items)
         
@@ -182,92 +173,75 @@ class FMRecommender(BaseRecommender):
         
         # 初始化FM模型参数
         torch.manual_seed(42)  # 设置随机种子确保可复现
-        self.w0 = 0.0
-        self.w = np.random.normal(0, 0.01, self.num_features).astype(np.float32)
-        self.v = np.random.normal(0, 0.01, (self.num_features, self.num_factors)).astype(np.float32)
-        
-        # 将模型参数转换为PyTorch张量
-        w0_tensor = torch.tensor(self.w0, dtype=torch.float32, requires_grad=True, device=self.device)
-        w_tensor = torch.tensor(self.w, dtype=torch.float32, requires_grad=True, device=self.device)
-        v_tensor = torch.tensor(self.v, dtype=torch.float32, requires_grad=True, device=self.device)
+        self.w0 = torch.tensor(0.0, dtype=torch.float32, requires_grad=True, device=self.device)
+        self.w = torch.tensor(
+            np.random.normal(0, 0.01, self.num_features).astype(np.float32), 
+            requires_grad=True, 
+            device=self.device
+        )
+        self.v = torch.tensor(
+            np.random.normal(0, 0.01, (self.num_features, self.num_factors)).astype(np.float32), 
+            requires_grad=True, 
+            device=self.device
+        )
         
         # 创建Adam优化器
-        optimizer = torch.optim.Adam([w0_tensor, w_tensor, v_tensor], lr=self.learning_rate)
+        optimizer = torch.optim.Adam([self.w0, self.w, self.v], lr=self.learning_rate)
+        # 学习率调度器
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=2
+        )
         
-        # 将数据转换为PyTorch张量
+        # 创建数据集和数据加载器
         X_tensor = torch.tensor(X, dtype=torch.float32, device=self.device)
         y_tensor = torch.tensor(y_normalized, dtype=torch.float32, device=self.device)
+        dataset = TensorDataset(X_tensor, y_tensor)
+        data_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
         
         # 训练模型
-        n_samples = X.shape[0]
-        indices = np.arange(n_samples)
-        
         for epoch in range(self.num_epochs):
-            # 打乱数据顺序
-            np.random.shuffle(indices)
-            X_shuffled = X_tensor[torch.tensor(indices, device=self.device)]
-            y_shuffled = y_tensor[torch.tensor(indices, device=self.device)]
+            epoch_loss = 0.0
             
             # 批量训练
-            epoch_loss = 0.0
-            for start in range(0, n_samples, self.batch_size):
-                end = min(start + self.batch_size, n_samples)
-                X_batch = X_shuffled[start:end]
-                y_batch = y_shuffled[start:end]
-                
+            for X_batch, y_batch in data_loader:
                 # 清零梯度
                 optimizer.zero_grad()
                 
-                # 前向传播
-                batch_preds = []
-                for i in range(len(X_batch)):
-                    x = X_batch[i]
-                    # 线性项
-                    linear_term = w0_tensor + torch.sum(w_tensor * x)
-                    
-                    # 交互项
-                    non_zero_indices = torch.nonzero(x).squeeze()
-                    vx = torch.index_select(v_tensor, 0, non_zero_indices) * torch.index_select(x, 0, non_zero_indices).unsqueeze(1)
-                    
-                    sum_square_term = torch.sum(vx, dim=0) ** 2
-                    square_sum_term = torch.sum(vx ** 2, dim=0)
-                    
-                    interaction_term = 0.5 * torch.sum(sum_square_term - square_sum_term)
-                    
-                    pred = linear_term + interaction_term
-                    batch_preds.append(pred)
+                # 前向传播 - 一次计算整个批次
+                pred = self.fm_forward(X_batch)
                 
-                batch_preds = torch.stack(batch_preds)
-                
-                # 计算损失
-                loss = torch.mean((batch_preds - y_batch) ** 2)
+                # 计算损失 - 使用均方误差
+                loss = torch.mean((pred - y_batch) ** 2)
                 
                 # 添加L2正则化
-                l2_reg = self.regularization * (torch.sum(w_tensor ** 2) + torch.sum(v_tensor ** 2))
+                l2_reg = self.regularization * (torch.sum(self.w ** 2) + torch.sum(self.v ** 2))
                 loss += l2_reg
                 
-                # 反向传播和优化
+                # 反向传播
                 loss.backward()
                 
-                # 应用梯度裁剪防止梯度爆炸
-                torch.nn.utils.clip_grad_norm_([w0_tensor, w_tensor, v_tensor], max_norm=1.0)
+                # 梯度裁剪
+                torch.nn.utils.clip_grad_norm_([self.w0, self.w, self.v], max_norm=1.0)
                 
+                # 更新参数
                 optimizer.step()
                 
-                # 累计批次损失
-                epoch_loss += loss.item() * len(X_batch)
+                epoch_loss += loss.item() * X_batch.size(0)
             
             # 计算平均损失
-            avg_loss = epoch_loss / n_samples
+            avg_loss = epoch_loss / len(dataset)
+            
+            # 更新学习率
+            scheduler.step(avg_loss)
             
             # 打印训练进度
             if (epoch + 1) % max(1, self.num_epochs // 10) == 0 or epoch == 0:
                 print(f"Epoch {epoch+1}/{self.num_epochs}, Loss: {avg_loss:.6f}")
         
-        # 保存最终训练好的参数
-        self.w0 = w0_tensor.item()
-        self.w = w_tensor.detach().cpu().numpy()
-        self.v = v_tensor.detach().cpu().numpy()
+        # 保存最终训练好的参数 - 转换为NumPy数组
+        self.w0 = self.w0.item()
+        self.w = self.w.detach().cpu().numpy()
+        self.v = self.v.detach().cpu().numpy()
         
         print("FM模型训练完成")
     
@@ -299,10 +273,39 @@ class FMRecommender(BaseRecommender):
             features = np.concatenate([user_item_ids, user_features, item_features]).astype(np.float32)
             
             return features
+            
         except Exception as e:
             print(f"特征提取错误: {e}")
             # 返回零向量作为回退策略
             return np.zeros(self.num_features, dtype=np.float32)
+    
+    def _fm_prediction(self, x):
+        """
+        FM模型预测函数 - 使用NumPy实现FM计算
+        
+        优化公式: y = w0 + ∑_i w_i * x_i + 0.5 * ∑_f [(∑_i v_{i,f} * x_i)^2 - ∑_i (v_{i,f} * x_i)^2]
+        """
+        # 线性项
+        linear_term = self.w0 + np.dot(self.w, x)
+        
+        # 使用向量化操作计算交互项
+        # 第一项: (sum_i v_i,f*x_i)^2
+        sum_vx = np.zeros(self.num_factors, dtype=np.float32)
+        for f in range(self.num_factors):
+            sum_vx[f] = np.dot(self.v[:, f], x)
+        sum_square = np.sum(sum_vx ** 2)
+        
+        # 第二项: sum_i (v_i,f*x_i)^2
+        square_sum = 0
+        for i in range(self.num_features):
+            if x[i] != 0:  # 稀疏优化
+                square_sum += np.sum((self.v[i] * x[i]) ** 2)
+        
+        # 计算交互项: 1/2 * (sum_square - square_sum)
+        interaction_term = 0.5 * (sum_square - square_sum)
+        
+        # 返回最终预测值
+        return float(linear_term + interaction_term)
     
     def predict(self, user_id: int, item_id: int) -> float:
         """预测用户对物品的评分"""
