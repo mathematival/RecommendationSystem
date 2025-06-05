@@ -16,24 +16,11 @@ class GBDTLRRecommender(BaseRecommender):
     """
     
     def __init__(self, config, num_trees=100, max_depth=6, learning_rate=0.05):
-        """
-        初始化GBDT+LR模型
-        
-        Parameters:
-        -----------
-        config : ExperimentConfig
-            实验配置对象
-        num_trees : int, default=100
-            GBDT模型中树的数量
-        max_depth : int, default=6
-            GBDT模型中树的最大深度
-        learning_rate : float, default=0.05
-            GBDT模型的学习率
-        """
+        """初始化GBDT+LR模型"""
         super().__init__(config)
-        self.num_trees = num_trees
-        self.max_depth = max_depth
-        self.learning_rate = learning_rate
+        self.num_trees = num_trees # GBDT树的数量
+        self.max_depth = max_depth # GBDT树的最大深度
+        self.learning_rate = learning_rate # GBDT的学习率
         self.gbdt_model = None
         self.lr_model = None
         self.one_hot_encoder = None
@@ -48,32 +35,16 @@ class GBDTLRRecommender(BaseRecommender):
         self.item_count = 0
     
     def _create_feature_matrix(self, users_data, items_data):
-        """
-        创建训练特征矩阵
-        
-        Parameters:
-        -----------
-        users_data : Dict
-            用户-物品评分数据
-        items_data : Dict
-            物品-用户评分数据
-            
-        Returns:
-        --------
-        X : numpy.ndarray
-            特征矩阵
-        y : numpy.ndarray
-            目标评分值
-        """
+        """创建训练特征矩阵"""
         print("创建特征矩阵...")
         
-        # 1. 创建用户和物品的索引映射
+        # 创建用户和物品的索引映射
         self.user_index_map = {user_id: idx for idx, user_id in enumerate(sorted(users_data.keys()))}
         self.item_index_map = {item_id: idx for idx, item_id in enumerate(sorted(items_data.keys()))}
         self.user_count = len(self.user_index_map)
         self.item_count = len(self.item_index_map)
         
-        # 2. 计算用户和物品的统计特征
+        # 计算用户和物品的统计特征
         for user_id, ratings in users_data.items():
             if ratings:
                 user_ratings = [r for _, r in ratings]
@@ -96,7 +67,7 @@ class GBDTLRRecommender(BaseRecommender):
             else:
                 self.item_stats[item_id] = {'mean': self.global_mean, 'count': 0, 'std': 0}
         
-        # 3. 创建特征矩阵和目标向量
+        # 创建特征矩阵和目标向量
         data = []
         
         # 收集数据
@@ -135,20 +106,11 @@ class GBDTLRRecommender(BaseRecommender):
         return X, y
         
     def fit(self, train_users: Dict, train_items: Dict) -> None:
-        """
-        训练GBDT+LR模型
-        
-        Parameters:
-        -----------
-        train_users : Dict
-            用户-物品评分数据
-        train_items : Dict
-            物品-用户评分数据
-        """
+        """训练GBDT+LR模型"""
         print("训练GBDT+LR模型...")
         super().fit(train_users, train_items)
         
-        # 1. 创建特征矩阵
+        # 创建特征矩阵
         X, y = self._create_feature_matrix(train_users, train_items)
         
         if len(X) == 0:
@@ -157,7 +119,7 @@ class GBDTLRRecommender(BaseRecommender):
             
         print(f"特征矩阵形状: {X.shape}, 目标向量长度: {len(y)}")
         
-        # 2. 训练GBDT模型
+        # 训练GBDT模型
         print("训练GBDT模型...")
         self.gbdt_model = lgb.LGBMRegressor(
             objective='regression',
@@ -170,11 +132,11 @@ class GBDTLRRecommender(BaseRecommender):
         
         self.gbdt_model.fit(X, y)
         
-        # 3. 获取叶子节点索引，进行特征转换
+        # 获取叶子节点索引，进行特征转换
         print("特征转换...")
         leaf_indices = self.gbdt_model.predict(X, pred_leaf=True)
         
-        # 4. 独热编码GBDT输出的叶子节点索引
+        # 独热编码GBDT输出的叶子节点索引
         print("独热编码...")
         self.one_hot_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
         gbdt_features = self.one_hot_encoder.fit_transform(leaf_indices)
@@ -184,7 +146,7 @@ class GBDTLRRecommender(BaseRecommender):
         # 将X转换为numpy数组
         X_array = X.values
         
-        # 5. 训练线性回归模型
+        # 训练线性回归模型
         print("训练线性回归模型...")
         self.lr_model = LinearRegression()
         self.lr_model.fit(gbdt_features, y)
@@ -192,21 +154,7 @@ class GBDTLRRecommender(BaseRecommender):
         print("GBDT+LR模型训练完成")
         
     def _extract_features(self, user_id: int, item_id: int) -> pd.DataFrame:
-        """
-        为单个用户-物品对提取特征
-        
-        Parameters:
-        -----------
-        user_id : int
-            用户ID
-        item_id : int
-            物品ID
-            
-        Returns:
-        --------
-        features : pd.DataFrame
-            特征向量
-        """
+        """为单个用户-物品对提取特征"""
         # 基本特征
         user_mean = self.user_stats.get(user_id, {'mean': self.global_mean})['mean']
         user_count = self.user_stats.get(user_id, {'count': 0})['count']
@@ -225,32 +173,18 @@ class GBDTLRRecommender(BaseRecommender):
         return features
         
     def predict(self, user_id: int, item_id: int) -> float:
-        """
-        预测用户对物品的评分
-        
-        Parameters:
-        -----------
-        user_id : int
-            用户ID
-        item_id : int
-            物品ID
-            
-        Returns:
-        --------
-        rating : float
-            预测评分
-        """
+        """预测用户对物品的评分"""
         if not self.gbdt_model or not self.lr_model:
             # 如果模型未训练，则回退到基线方法
             return self.global_mean
         
-        # 1. 提取特征
+        # 提取特征
         features = self._extract_features(user_id, item_id)
         
-        # 2. 使用GBDT模型进行特征转换
+        # 使用GBDT模型进行特征转换
         leaf_indices = self.gbdt_model.predict(features, pred_leaf=True)
         
-        # 3. 独热编码
+        # 独热编码
         try:
             gbdt_features = self.one_hot_encoder.transform(leaf_indices)
         except Exception as e:
@@ -259,7 +193,7 @@ class GBDTLRRecommender(BaseRecommender):
             # 回退到基线方法
             return self.item_means.get(item_id, self.global_mean)
         
-        # 4. 使用LR模型预测
+        # 使用LR模型预测
         pred = self.lr_model.predict(gbdt_features)[0]
         
         # 确保预测值在有效范围内
