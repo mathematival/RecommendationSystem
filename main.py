@@ -58,8 +58,7 @@ def evaluate_models(config, results, models_to_run):
                 
                 eval_results.append({
                     "model_name": model_name,
-                    "metrics": validation_metrics,
-                    "runtime": result['runtime']
+                    "metrics": validation_metrics
                 })
     
     return eval_results
@@ -153,7 +152,6 @@ def main():
         print(f"模型: {result['model_name']}")
         for metric, value in result['metrics'].items():
             print(f"  {metric}: {value:.4f}")
-        print(f"  运行时间: {result['runtime']:.2f}秒")
         print("-" * 30)
 
 if __name__ == "__main__":

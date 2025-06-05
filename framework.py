@@ -1,6 +1,5 @@
 import numpy as np
 import os
-import time
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Callable, Any, Optional, Union
 from tqdm import tqdm
@@ -273,13 +272,11 @@ class ExperimentRunner:
         self.config = config
         self.data_processor = DataProcessor(config)
         self.evaluator = Evaluator(config)
-        
+
     def run_experiment(self, model_class, model_params=None) -> Dict:
         """运行单个实验"""
         if model_params is None:
             model_params = {}
-            
-        start_time = time.time()
         
         # 加载数据
         train_users, train_items, test_pairs, all_users, all_items = self.data_processor.load_data()
@@ -302,12 +299,8 @@ class ExperimentRunner:
         # 保存预测结果
         save_predictions(predictions, self.config.result_file_path)
         
-        # 计算运行时间
-        runtime = time.time() - start_time
-        
         return {
             "model_name": model.__class__.__name__,
-            "runtime": runtime,
             "num_predictions": len(predictions),
             "result_file": self.config.result_file_path
         }
@@ -336,6 +329,5 @@ class ExperimentRunner:
             results.append(result)
             
             print(f"完成! 结果保存在: {result['result_file']}")
-            print(f"运行时间: {result['runtime']:.2f} 秒")
             
         return results
