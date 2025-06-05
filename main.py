@@ -2,6 +2,8 @@ import numpy as np
 
 from framework import *
 from models.base_models import *
+# 导入GBDT+LR模型
+from models.gbdt_lr import GBDTLRRecommender
 
 def train_and_predict(config, models_to_run):
     """训练模型并生成预测结果"""
@@ -92,6 +94,10 @@ def main():
         {
             "class": BiasedBaselineRecommender,
             "config_override": {"result_filename": "biased_baseline_predictions.txt"}
+        },
+        {
+            "class": GBDTLRRecommender,
+            "config_override": {"result_filename": "gbdt_lr_predictions.txt"}
         }
     ]
     
