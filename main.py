@@ -1,4 +1,5 @@
 import numpy as np
+import argparse
 
 from framework import *
 from models import *
@@ -63,41 +64,79 @@ def evaluate_models(config, results, models_to_run):
     
     return eval_results
 
+def parse_args():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description='推荐系统实验运行器')
+    
+    parser.add_argument('--model', type=str, default='all',
+                      choices=['all', 'global_mean', 'user_mean', 'item_mean', 
+                              'biased_baseline', 'gbdt_lr'],
+                      help='选择要运行的推荐模型')
+    
+    parser.add_argument('--train_path', type=str, default='./data/train.txt',
+                      help='训练数据路径')
+    
+    parser.add_argument('--test_path', type=str, default='./data/test.txt',
+                      help='测试数据路径')
+    
+    parser.add_argument('--result_path', type=str, default='./results/',
+                      help='结果保存路径')
+    
+    parser.add_argument('--seed', type=int, default=42,
+                      help='随机数种子')
+    
+    return parser.parse_args()
+
+def get_model_config(model_name):
+    """根据模型名称返回模型配置"""
+    model_configs = {
+        'global_mean': {
+            "class": GlobalMeanRecommender,
+            "config_override": {"result_filename": "global_mean_predictions.txt"}
+        },
+        'user_mean': {
+            "class": UserMeanRecommender,
+            "config_override": {"result_filename": "user_mean_predictions.txt"}
+        },
+        'item_mean': {
+            "class": ItemMeanRecommender,
+            "config_override": {"result_filename": "item_mean_predictions.txt"}
+        },
+        'biased_baseline': {
+            "class": BiasedBaselineRecommender,
+            "config_override": {"result_filename": "biased_baseline_predictions.txt"}
+        },
+        'gbdt_lr': {
+            "class": GBDTLRRecommender,
+            "config_override": {"result_filename": "gbdt_lr_predictions.txt"}
+        }
+    }
+    return model_configs.get(model_name)
+
 def main():
-    # 创建默认配置
+    # 解析命令行参数
+    args = parse_args()
+    
+    # 创建配置
     config = ExperimentConfig(
-        random_seed=42,
-        train_path="./data/train.txt",
-        test_path="./data/test.txt",
-        result_path="./results/",
+        random_seed=args.seed,
+        train_path=args.train_path,
+        test_path=args.test_path,
+        result_path=args.result_path,
         normalize_ratings=True,  # 启用评分归一化
         cold_start_strategy="item_mean",  # 冷启动策略
         metrics=["rmse", "mae"]  # 评估指标
     )
     
-    # 定义要运行的模型
-    models_to_run = [
-        {
-            "class": GlobalMeanRecommender,
-            "config_override": {"result_filename": "global_mean_predictions.txt"}
-        },
-        {
-            "class": UserMeanRecommender,
-            "config_override": {"result_filename": "user_mean_predictions.txt"}
-        },
-        {
-            "class": ItemMeanRecommender, 
-            "config_override": {"result_filename": "item_mean_predictions.txt"}
-        },
-        {
-            "class": BiasedBaselineRecommender,
-            "config_override": {"result_filename": "biased_baseline_predictions.txt"}
-        },
-        {
-            "class": GBDTLRRecommender,
-            "config_override": {"result_filename": "gbdt_lr_predictions.txt"}
-        }
-    ]
+    # 根据命令行参数选择要运行的模型
+    if args.model == 'all':
+        models_to_run = [
+            get_model_config(model_name) 
+            for model_name in ['global_mean', 'user_mean', 'item_mean', 
+                             'biased_baseline', 'gbdt_lr']
+        ]
+    else:
+        models_to_run = [get_model_config(args.model)]
     
     # 训练和预测阶段
     training_results = train_and_predict(config, models_to_run)

@@ -24,3 +24,22 @@
 https://datawhalechina.github.io/fun-rec/#/
 
 lxm学长的代码报告
+
+## 运行方法
+
+可以通过以下方式使用命令行参数来运行程序：
+
+1. 运行所有模型（默认）：
+```bash
+python main.py
+```
+
+2. 只运行特定模型：
+```bash
+python main.py --model gbdt_lr
+```
+
+3. 指定其他参数：
+```bash
+python main.py --model gbdt_lr --train_path data/my_train.txt --test_path data/my_test.txt --seed 42
+```
