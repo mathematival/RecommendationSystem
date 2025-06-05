@@ -69,7 +69,7 @@ def parse_args():
     
     parser.add_argument('--model', type=str, default='all',
                       choices=['all', 'global_mean', 'user_mean', 'item_mean', 
-                              'biased_baseline', 'gbdt_lr'],
+                              'biased_baseline', 'gbdt_lr', 'fm'],
                       help='选择要运行的推荐模型')
     
     parser.add_argument('--train_path', type=str, default='./data/train.txt',
@@ -108,6 +108,10 @@ def get_model_config(model_name):
         'gbdt_lr': {
             "class": GBDTLRRecommender,
             "config_override": {"result_filename": "gbdt_lr_predictions.txt"}
+        },
+        'fm': {
+            "class": FMRecommender,
+            "config_override": {"result_filename": "fm_predictions.txt"}
         }
     }
     return model_configs.get(model_name)
@@ -126,13 +130,12 @@ def main():
         cold_start_strategy="item_mean",  # 冷启动策略
         metrics=["rmse", "mae"]  # 评估指标
     )
-    
     # 根据命令行参数选择要运行的模型
     if args.model == 'all':
         models_to_run = [
             get_model_config(model_name) 
             for model_name in ['global_mean', 'user_mean', 'item_mean', 
-                             'biased_baseline', 'gbdt_lr']
+                             'biased_baseline', 'gbdt_lr', 'fm']
         ]
     else:
         models_to_run = [get_model_config(args.model)]

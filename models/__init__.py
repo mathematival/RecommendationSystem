@@ -14,6 +14,7 @@ from models.base_models import (
 
 # 导入进阶模型
 from models.gbdt_lr import GBDTLRRecommender
+from models.fm import FMRecommender
 
 # 导出所有模型，这样就可以通过 from models import * 导入所有模型
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     
     # 进阶模型
     'GBDTLRRecommender',
+    'FMRecommender',
 ]

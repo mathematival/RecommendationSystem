@@ -43,3 +43,15 @@ python main.py --model gbdt_lr
 ```bash
 python main.py --model gbdt_lr --train_path data/my_train.txt --test_path data/my_test.txt --seed 42
 ```
+
+## 参考结果
+
+| 模型 | RMSE | MAE | 运行时间(秒) |
+|------|------|-----|-------------|
+| GlobalMeanRecommender | 20.5654 | 16.2754 | 0.22 |
+| UserMeanRecommender | 18.4579 | 14.3839 | 0.27 |
+| ItemMeanRecommender | 17.3269 | 13.1534 | 0.29 |
+| BiasedBaselineRecommender | 15.8856 | 11.8685 | 0.34 |
+| GBDTLRRecommender | 14.7330 | 11.0346 | 98.32 |
+
+
