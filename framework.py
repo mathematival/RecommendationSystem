@@ -3,6 +3,7 @@ import os
 import time
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Callable, Any, Optional, Union
+from tqdm import tqdm
 
 # 复用已有的数据加载函数
 from data_analysis import load_training_data, load_test_data
@@ -120,7 +121,7 @@ class BaseRecommender:
     def predict_all(self, test_pairs: List[Tuple[int, int]]) -> List[Tuple[int, int, float]]:
         """预测所有测试集中的评分"""
         return [(user, item, self.predict_for_user(user, item)) 
-                for user, item in test_pairs]
+                for user, item in tqdm(test_pairs, desc="预测评分", unit="对")]
 
 
 class DataProcessor:
