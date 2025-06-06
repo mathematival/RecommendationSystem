@@ -12,6 +12,10 @@ from models.base_models import (
     BiasedBaselineRecommender
 )
 
+# 导入协同过滤模型
+from models.itemcf import ItemCFRecommender
+from models.usercf import UserCFRecommender
+
 # 导入进阶模型
 from models.gbdt_lr import GBDTLRRecommender
 from models.fm import FMRecommender
@@ -23,6 +27,10 @@ __all__ = [
     'UserMeanRecommender',
     'ItemMeanRecommender',
     'BiasedBaselineRecommender',
+    
+    # 协同过滤模型
+    'ItemCFRecommender',
+    'UserCFRecommender',
     
     # 进阶模型
     'GBDTLRRecommender',

@@ -1,17 +1,13 @@
 import math
 from collections import defaultdict
-from tqdm import tqdm  # 新增：进度条库
+from tqdm import tqdm
 
-class ItemCFRecommender:
+from framework import BaseRecommender
+
+class ItemCFRecommender(BaseRecommender):
     def __init__(self, config, similarity_top_k=20, recommend_top_n=10):
-        """
-        ItemCF 推荐模型初始化
-        Args:
-            config: 全局配置对象（框架要求）
-            similarity_top_k: 计算相似物品时取的前K个相似物品
-            recommend_top_n: 最终推荐的物品数量
-        """
-        self.config = config
+        """ItemCF 推荐模型初始化"""
+        super().__init__(config)
         self.similarity_top_k = similarity_top_k  # K参数（相似物品数）
         self.recommend_top_n = recommend_top_n    # N参数（推荐数量）
         
@@ -20,14 +16,17 @@ class ItemCFRecommender:
         self.item_popular = defaultdict(int)       # 物品流行度（被多少用户交互过）
         self.trn_user_items = None                # 训练数据（用户-物品交互字典）
 
-    def fit(self, trn_user_items, train_items=None):
-        """
-        训练模型（构建物品相似度矩阵）
-        Args:
-            trn_user_items (dict): 训练数据，格式 {user_id: {item_id1, item_id2, ...}}
-            train_items: 框架保留参数（未使用）
-        """
-        self.trn_user_items = trn_user_items
+    def fit(self, train_users, train_items=None):
+        """训练模型（构建物品相似度矩阵）"""
+        # 调用父类的fit方法计算全局均值和各类均值
+        super().fit(train_users, train_items)
+        
+        # 构建用户-物品交互字典
+        self.trn_user_items = {
+            user: {item for item, _ in items} 
+            for user, items in train_users.items()
+        }
+        
         self._build_item_popularity()  # 统计物品流行度
         self._calculate_item_similarity()  # 计算物品相似度矩阵
 
@@ -66,15 +65,11 @@ class ItemCFRecommender:
                 self.item_similarity[item_i][item_j] = common_count / denominator if denominator != 0 else 0
 
     def recommend(self, user_id):
-        """
-        为指定用户生成推荐（返回带分数的列表）
-        Args:
-            user_id: 需要推荐的用户ID
-        Returns:
-            list: 推荐的物品及分数列表，格式 [(item_id, score), ...]（按分数降序）
-        """
+        """为指定用户生成推荐（返回带分数的列表）"""
         if self.trn_user_items is None:
             raise ValueError("模型未训练，请先调用 fit() 方法")
+        
+        # 对于新用户，返回空列表
         if user_id not in self.trn_user_items:
             return []
 
@@ -92,26 +87,37 @@ class ItemCFRecommender:
                 if sim_item not in user_hist_items:
                     candidate_scores[sim_item] += score
 
-        # 保留分数，返回 [(item, score)] 格式（原仅返回 item 列表）
+        # 保留分数，返回 [(item, score)] 格式
         return sorted(candidate_scores.items(), key=lambda x: x[1], reverse=True)[:self.recommend_top_n]
 
-    def predict_all(self, test_users):
-        """
-        框架要求的批量预测方法（返回三元组列表）
-        Args:
-            test_users (list): 需要预测的用户ID列表（如 [user1, user2, ...]）
-        Returns:
-            list: 预测结果，格式 [(user_id, item_id, score), ...]
-        """
-        predictions = []
-        for user_id in test_users:
-            # 获取带分数的推荐列表 [(item, score), ...]
-            user_recommendations = self.recommend(user_id)
-            # 转换为框架需要的三元组
-            for item_id, score in user_recommendations:
-                predictions.append((user_id, item_id, score))
-        return predictions
+    def predict(self, user_id, item_id):
+        """符合框架接口的预测方法"""
+        if user_id not in self.trn_user_items:
+            # 对于框架中的冷启动处理，使用父类的预测
+            return super().predict_for_user(user_id, item_id)
+        
+        # 如果用户已经评分过该物品，直接返回该物品的平均评分
+        if user_id in self.trn_user_items and item_id in self.trn_user_items[user_id]:
+            return self.item_means.get(item_id, self.global_mean)
+            
+        # 否则使用协同过滤进行预测
+        user_recommendations = self.recommend(user_id)
+        for rec_item, score in user_recommendations:
+            if rec_item == item_id:
+                # 将相似度分数缩放到评分范围
+                rating_range = self.config.rating_max - self.config.rating_min
+                pred = self.config.rating_min + score * rating_range
+                # 确保预测值在配置的评分范围内
+                return max(self.config.rating_min, min(self.config.rating_max, pred))
+                
+        # 如果无法做出预测，使用物品平均值
+        return self.item_means.get(item_id, self.global_mean)
 
-    def predict(self, user_id, item_id=None):
-        """框架兼容方法（示例返回推荐列表）"""
-        return self.recommend(user_id)
+    def predict_all(self, test_pairs):
+        """框架要求的批量预测方法（返回三元组列表）"""
+        predictions = []
+        for user_id, item_id in tqdm(test_pairs, desc="ItemCF预测"):
+            # 使用predict_for_user确保评分范围和冷启动处理完全符合框架标准
+            pred_score = self.predict_for_user(user_id, item_id)
+            predictions.append((user_id, item_id, pred_score))
+        return predictions

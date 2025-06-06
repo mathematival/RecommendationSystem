@@ -2,10 +2,8 @@ import numpy as np
 import argparse
 
 # 在顶部添加引用
-from models.itemcf import ItemCFRecommender
 from framework import *
 from models import *
-from models.usercf import UserCFRecommender
 
 def train_and_predict(config, models_to_run):
     """训练模型并生成预测结果"""
@@ -72,7 +70,7 @@ def parse_args():
     
     parser.add_argument('--model', type=str, default='all',
                       choices=['all', 'global_mean', 'user_mean', 'item_mean', 
-                              'biased_baseline', 'gbdt_lr', 'fm'],
+                              'biased_baseline', 'usercf', 'itemcf', 'gbdt_lr', 'fm'],
                       help='选择要运行的推荐模型')
     
     parser.add_argument('--train_path', type=str, default='./data/train.txt',
@@ -108,17 +106,12 @@ def get_model_config(model_name):
             "class": BiasedBaselineRecommender,
             "config_override": {"result_filename": "biased_baseline_predictions.txt"}
         },
-        {
+        'usercf': {
             "class": UserCFRecommender,
-            "params": {"k": 15},
             "config_override": {"result_filename": "usercf_predictions.txt"}
         },
-        {
+        'itemcf': {
             "class": ItemCFRecommender,
-            "params": {
-                "similarity_top_k": 20,
-                "recommend_top_n": 10
-            },
             "config_override": {"result_filename": "itemcf_predictions.txt"}
         },
         'gbdt_lr': {
@@ -151,7 +144,7 @@ def main():
         models_to_run = [
             get_model_config(model_name) 
             for model_name in ['global_mean', 'user_mean', 'item_mean', 
-                             'biased_baseline', 'gbdt_lr', 'fm']
+                             'biased_baseline', 'usercf', 'itemcf', 'gbdt_lr', 'fm']
         ]
     else:
         models_to_run = [get_model_config(args.model)]
