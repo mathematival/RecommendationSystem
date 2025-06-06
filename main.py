@@ -182,7 +182,7 @@ def main():
         models_to_run = [
             get_model_config(model_name) 
             for model_name in ['global_mean', 'user_mean', 'item_mean', 
-                             'biased_baseline', 'usercf', 'itemcf', 'gbdt_lr', 'fm']
+                             'biased_baseline', 'usercf', 'itemcf', 'gbdt_lr'] # 从列表中移除了 'fm'
         ]
     else:
         models_to_run = [get_model_config(args.model)]
