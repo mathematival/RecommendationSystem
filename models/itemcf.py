@@ -60,24 +60,24 @@ class ItemCFRecommender(BaseRecommender):
         """计算物品相似度矩阵（根据选择的方法）"""
         print("计算物品相似度矩阵...")
         
-        if self.similarity_method in ['cosine', 'improved']:
-            self._calculate_item_similarity_improved()
+        if self.similarity_method == 'cosine':
+            self._calculate_item_similarity_cosine()
         elif self.similarity_method == 'pearson':
             self._calculate_item_similarity_pearson()
+        elif self.similarity_method == 'improved':
+            self._calculate_item_similarity_improved()
         else:
             print(f"不支持的相似度方法: {self.similarity_method}，使用改进的相似度计算")
             self._calculate_item_similarity_improved()
-    
-    def _calculate_item_similarity_improved(self) -> None:
-        """使用改进的方法计算物品相似度"""
-        print("使用改进的方法计算物品相似度矩阵...")
+
+    def _calculate_item_similarity_cosine(self) -> None:
+        """使用标准余弦相似度计算物品相似度"""
+        print("计算物品余弦相似度...")
         
         # 初始化相似度矩阵
         similarity_matrix = defaultdict(lambda: defaultdict(float))
         
         # 遍历所有物品对
-        print("计算物品相似度...")
-        
         with tqdm(total=len(self.item_users), desc="计算物品相似度") as pbar:
             for item_i in self.item_users:
                 users_i = self.item_users[item_i]
@@ -94,27 +94,9 @@ class ItemCFRecommender(BaseRecommender):
                     if not common_users:
                         continue
                     
-                    # 计算基础相似度
-                    if self.similarity_method == 'cosine':
-                        # 标准余弦相似度
-                        denominator = math.sqrt(len(users_i) * len(users_j))
-                        sim_ij = len(common_users) / denominator if denominator > 0 else 0
-                    
-                    elif self.similarity_method == 'improved':
-                        # 使用改进公式: |N(i) ∩ N(j)| / (|N(i)|^(1-α) * |N(j)|^α)
-                        denominator = (len(users_i) ** (1 - self.alpha)) * (len(users_j) ** self.alpha)
-                        
-                        if self.penalize_active_users:
-                            # 对活跃用户进行惩罚
-                            numerator = 0.0
-                            for user in common_users:
-                                # 用户贡献与活跃度成反比
-                                user_weight = 1.0 / math.log(1.0 + self.user_counts[user])
-                                numerator += user_weight
-                        else:
-                            numerator = len(common_users)
-                            
-                        sim_ij = numerator / denominator if denominator > 0 else 0
+                    # 标准余弦相似度: |N(i) ∩ N(j)| / sqrt(|N(i)| * |N(j)|)
+                    denominator = math.sqrt(len(users_i) * len(users_j))
+                    sim_ij = len(common_users) / denominator if denominator > 0 else 0
                     
                     # 保存正相似度（对称的）
                     if sim_ij > 0:
@@ -125,7 +107,56 @@ class ItemCFRecommender(BaseRecommender):
         
         # 将计算结果保存到模型
         self.item_similarity = similarity_matrix
-    
+
+    def _calculate_item_similarity_improved(self) -> None:
+        """使用改进的方法计算物品相似度"""
+        print("使用改进的相似度计算方法...")
+        
+        # 初始化相似度矩阵
+        similarity_matrix = defaultdict(lambda: defaultdict(float))
+        
+        # 遍历所有物品对
+        with tqdm(total=len(self.item_users), desc="计算物品相似度") as pbar:
+            for item_i in self.item_users:
+                users_i = self.item_users[item_i]
+                
+                for item_j in self.item_users:
+                    if item_i >= item_j:  # 避免重复计算
+                        continue
+                    
+                    users_j = self.item_users[item_j]
+                    
+                    # 找到同时喜欢物品i和j的用户集合
+                    common_users = users_i & users_j
+                    
+                    if not common_users:
+                        continue
+                    
+                    # 使用改进公式: |N(i) ∩ N(j)| / (|N(i)|^(1-α) * |N(j)|^α)
+                    denominator = (len(users_i) ** (1 - self.alpha)) * (len(users_j) ** self.alpha)
+                    
+                    if self.penalize_active_users:
+                        # 对活跃用户进行惩罚
+                        numerator = 0.0
+                        for user in common_users:
+                            # 用户贡献与活跃度成反比
+                            user_weight = 1.0 / math.log(1.0 + self.user_counts[user])
+                            numerator += user_weight
+                    else:
+                        numerator = len(common_users)
+                        
+                    sim_ij = numerator / denominator if denominator > 0 else 0
+                    
+                    # 保存正相似度（对称的）
+                    if sim_ij > 0:
+                        similarity_matrix[item_i][item_j] = sim_ij
+                        similarity_matrix[item_j][item_i] = sim_ij
+                
+                pbar.update(1)
+        
+        # 将计算结果保存到模型
+        self.item_similarity = similarity_matrix
+
     def _calculate_item_similarity_pearson(self) -> None:
         """使用皮尔逊相关系数计算物品相似度"""
         print("计算物品皮尔逊相关系数...")
