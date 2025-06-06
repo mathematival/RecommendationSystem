@@ -1,8 +1,11 @@
 import numpy as np
 import argparse
 
+# 在顶部添加引用
+from models.itemcf import ItemCFRecommender
 from framework import *
 from models import *
+from models.usercf import UserCFRecommender
 
 def train_and_predict(config, models_to_run):
     """训练模型并生成预测结果"""
@@ -104,6 +107,19 @@ def get_model_config(model_name):
         'biased_baseline': {
             "class": BiasedBaselineRecommender,
             "config_override": {"result_filename": "biased_baseline_predictions.txt"}
+        },
+        {
+            "class": UserCFRecommender,
+            "params": {"k": 15},
+            "config_override": {"result_filename": "usercf_predictions.txt"}
+        },
+        {
+            "class": ItemCFRecommender,
+            "params": {
+                "similarity_top_k": 20,
+                "recommend_top_n": 10
+            },
+            "config_override": {"result_filename": "itemcf_predictions.txt"}
         },
         'gbdt_lr': {
             "class": GBDTLRRecommender,
