@@ -263,7 +263,8 @@ def save_predictions(predictions: List[Tuple[int, int, float]], output_path: str
             f.write(f"{user_id}|{len(items)}\n")
             # 写入物品评分行
             for item_id, rating in items:
-                f.write(f"{item_id}  {rating:.1f}\n")
+                # 使用标准四舍五入
+                f.write(f"{item_id}  {int(round(rating))}\n")
 
 
 class ExperimentRunner:
