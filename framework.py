@@ -20,7 +20,6 @@ class ExperimentConfig:
                  result_filename: str = "predictions.txt",
                  rating_min: float = 10.0,
                  rating_max: float = 100.0,
-                 normalize_ratings: bool = False,
                  metrics: List[str] = ["rmse", "mae"],
                  cold_start_strategy: str = "item_mean"):
         
@@ -31,7 +30,6 @@ class ExperimentConfig:
         self.result_filename = result_filename
         self.rating_min = rating_min
         self.rating_max = rating_max
-        self.normalize_ratings = normalize_ratings
         self.metrics = metrics
         self.cold_start_strategy = cold_start_strategy
         
@@ -146,39 +144,6 @@ class DataProcessor:
         
         return train_users, train_items, test_pairs, all_users, all_items
     
-    def normalize_ratings(self, train_users: Dict) -> Dict:
-        """对用户评分进行归一化处理"""
-        if not self.config.normalize_ratings:
-            return train_users
-            
-        normalized_users = {}
-        
-        for user_id, ratings in train_users.items():
-            if not ratings:
-                normalized_users[user_id] = []
-                continue
-                
-            # 获取该用户的评分范围
-            user_ratings = [r for _, r in ratings]
-            min_rating = min(user_ratings)
-            max_rating = max(user_ratings)
-            rating_range = max_rating - min_rating
-            
-            if rating_range == 0:
-                # 如果用户所有评分相同，则保持不变
-                normalized_users[user_id] = ratings.copy()
-            else:
-                # 归一化到[rating_min, rating_max]区间
-                normalized = []
-                for item_id, rating in ratings:
-                    norm_rating = ((rating - min_rating) / rating_range) * \
-                                 (self.config.rating_max - self.config.rating_min) + \
-                                 self.config.rating_min
-                    normalized.append((item_id, norm_rating))
-                normalized_users[user_id] = normalized
-                
-        return normalized_users
-    
     def convert_to_item_ratings(self, user_ratings: Dict) -> Dict:
         """将用户评分转换为物品评分格式"""
         item_ratings = {}
@@ -197,6 +162,11 @@ class Evaluator:
     
     def __init__(self, config: ExperimentConfig):
         self.config = config
+        
+    def get_memory_usage(self) -> float:
+        """获取当前进程的内存使用量(MB)"""
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / 1024 / 1024  # 转换为MB
         
     def calculate_rmse(self, true_ratings: List[Tuple[int, int, float]], 
                       pred_ratings: List[Tuple[int, int, float]]) -> float:
@@ -247,8 +217,36 @@ class Evaluator:
             results["RMSE"] = self.calculate_rmse(test_ratings, pred_ratings)
         if "mae" in self.config.metrics:
             results["MAE"] = self.calculate_mae(test_ratings, pred_ratings)
-        # 后续可以添加更多指标，暂时删除覆盖率和新颖度指标
 
+        return results
+    
+    def train_and_evaluate_model(self, model_class, train_users: Dict, train_items: Dict, 
+                                test_data: List[Tuple[int, int, float]], model_params=None) -> Dict[str, float]:
+        """训练模型并评估性能，包括训练时间和内存使用"""
+        if model_params is None:
+            model_params = {}
+            
+        # 记录训练前的性能指标
+        initial_memory = self.get_memory_usage()
+        start_time = time.time()
+        
+        # 创建并训练模型
+        model = model_class(self.config, **model_params)
+        model.fit(train_users, train_items)
+        
+        # 记录训练后的性能指标
+        training_time = time.time() - start_time
+        training_memory = self.get_memory_usage()
+        
+        eval_results = self.evaluate_model(model, test_data)
+        
+        # 合并所有结果
+        results = eval_results.copy()
+        results["training_time"] = training_time
+        results["initial_memory"] = initial_memory
+        results["memory_usage"] = training_memory - initial_memory
+        results["max_memory"] = training_memory
+        
         return results
 
 
@@ -269,35 +267,19 @@ def save_predictions(predictions: List[Tuple[int, int, float]], output_path: str
 
 
 class ExperimentRunner:
-    """实验运行管理器"""
+    """实验运行管理器 - 负责训练和预测阶段"""
     
     def __init__(self, config: ExperimentConfig):
         self.config = config
         self.data_processor = DataProcessor(config)
-        self.evaluator = Evaluator(config)
-
-    def get_memory_usage(self) -> float:
-        """获取当前进程的内存使用量(MB)"""
-        process = psutil.Process(os.getpid())
-        return process.memory_info().rss / 1024 / 1024  # 转换为MB
 
     def run_experiment(self, model_class, model_params=None) -> Dict:
-        """运行单个实验"""
+        """运行单个训练和预测实验"""
         if model_params is None:
             model_params = {}
         
-        # 记录初始内存使用量
-        initial_memory = self.get_memory_usage()
-        max_memory = initial_memory
-        start_time = time.time()
-
         # 加载数据
         train_users, train_items, test_pairs, all_users, all_items = self.data_processor.load_data()
-        
-        # 如果需要，进行评分归一化
-        if self.config.normalize_ratings:
-            train_users = self.data_processor.normalize_ratings(train_users)
-            train_items = self.data_processor.convert_to_item_ratings(train_users)
         
         # 创建并训练模型
         model = model_class(self.config, **model_params)
@@ -305,14 +287,6 @@ class ExperimentRunner:
         
         # 训练模型
         model.fit(train_users, train_items)
-        
-        # 记录训练过程中的最大内存使用量
-        current_memory = self.get_memory_usage()
-        max_memory = max(max_memory, current_memory)
-        
-        # 计算训练时间和内存消耗
-        training_time = time.time() - start_time
-        memory_usage = max_memory - initial_memory
         
         # 预测测试集
         print("开始预测...")
@@ -324,15 +298,11 @@ class ExperimentRunner:
         return {
             "model_name": model.__class__.__name__,
             "num_predictions": len(predictions),
-            "result_file": self.config.result_file_path,
-            "training_time": training_time,      # 训练时间(秒)
-            "memory_usage": memory_usage,        # 训练过程中的内存增长量(MB)
-            "max_memory": max_memory,            # 训练过程中的最大内存使用量(MB)
-            "initial_memory": initial_memory     # 初始内存使用量(MB)
+            "result_file": self.config.result_file_path
         }
         
     def run_experiments(self, models_config: List[Dict]) -> List[Dict]:
-        """运行多个实验并比较结果"""
+        """运行多个训练和预测实验"""
         results = []
         
         for model_config in models_config:

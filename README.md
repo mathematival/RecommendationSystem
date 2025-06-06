@@ -29,32 +29,58 @@ lxm学长的代码报告
 
 可以通过以下方式使用命令行参数来运行程序：
 
-1. 运行所有模型（默认）：
+1. **运行所有阶段和所有模型（默认）**：
 ```bash
 python main.py
 ```
 
-2. 只运行特定模型：
+2. **只执行训练测试阶段**：
 ```bash
-python main.py --model gbdt_lr
+python main.py --mode train
 ```
 
-3. 指定其他参数：
+3. **只执行模型评估阶段**：
 ```bash
-python main.py --model gbdt_lr --train_path data/my_train.txt --test_path data/my_test.txt --seed 42
+python main.py --mode evaluate
+```
+
+4. **运行特定模型**：
+```bash
+python main.py --model usercf
+python main.py --model gbdt_lr
+python main.py --model fm
+```
+
+5. **组合模式和模型选择**：
+```bash
+# 只训练特定模型
+python main.py --mode train --model itemcf
+
+# 只评估特定模型
+python main.py --mode evaluate --model biased_baseline
+```
+
+6. **指定数据路径和其他参数**：
+```bash
+python main.py --train_path data/my_train.txt --test_path data/my_test.txt --seed 42
+```
+
+7. **完整参数示例**：
+```bash
+python main.py --mode all --model gbdt_lr --train_path ./data/train.txt --test_path ./data/test.txt --result_path ./my_results/ --seed 123
 ```
 
 ## 参考结果
 
 | 模型名称 | RMSE | MAE | 训练时间(秒) |
 |---------|------|-----|------------|
-| GlobalMeanRecommender | 20.5658 | 16.2820 | 0.18 |
-| UserMeanRecommender | 18.5947 | 14.4972 | 0.19 |
-| ItemMeanRecommender | 19.2694 | 14.8671 | 0.19 |
-| BiasedBaselineRecommender | 17.6669 | 13.4715 | 0.26 |
-| UserCFRecommender | 18.7490 | 14.2381 | 3.00 |
-| ItemCFRecommender | 17.1911 | 13.0661 | 22.65 |
-| GBDTLRRecommender | 17.7710 | 13.4026 | 36.66 |
-| FMRecommender | 17.5434 | 13.4253 | 17.54 |
+| GlobalMeanRecommender | 20.5658 | 16.2820 | 0.06 |
+| UserMeanRecommender | 18.5947 | 14.4972 | 0.06 |
+| ItemMeanRecommender | 19.2694 | 14.8671 | 0.06 |
+| BiasedBaselineRecommender | 17.6669 | 13.4715 | 0.12 |
+| UserCFRecommender | 18.7490 | 14.2381 | 2.30 |
+| ItemCFRecommender | 17.1911 | 13.0661 | 16.85 |
+| GBDTLRRecommender | 17.7710 | 13.4026 | 31.71 |
+| FMRecommender | 17.5434 | 13.4253 | 15.57 |
 
 

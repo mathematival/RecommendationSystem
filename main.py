@@ -17,7 +17,7 @@ def train_and_predict(config, models_to_run):
     
     return results
 
-def evaluate_models(config, results, models_to_run):
+def evaluate_models(config, models_to_run):
     """评估模型性能"""
     print("\n" + "="*50)
     print("模型评估阶段")
@@ -67,31 +67,44 @@ def evaluate_models(config, results, models_to_run):
     print("\n验证集评估结果:")
     eval_results = []
     
-    for result in results:
-        model_name = result['model_name']
-        for model_config in models_to_run:
-            if model_config["class"].__name__ == model_name:
-                # 创建并在"留出"的训练集上训练模型
-                model = model_config["class"](config, **(model_config.get("params", {})))
-                model.fit(train_users_holdout, train_items_holdout)
-                
-                # 在验证集上评估
-                validation_metrics = evaluator.evaluate_model(model, validation_data)
-                
-                print(f"模型: {model_name}")
-                for metric, value in validation_metrics.items():
-                    print(f"  {metric}: {value:.4f}")
-                
-                eval_results.append({
-                    "model_name": model_name,
-                    "metrics": validation_metrics
-                })
+    for model_config in models_to_run:
+        model_class = model_config["class"]
+        model_params = model_config.get("params", {})
+        model_name = model_class.__name__
+        
+        print(f"正在评估模型: {model_name}")
+        
+        # 使用评估器训练和评估模型
+        results = evaluator.train_and_evaluate_model(
+            model_class, train_users_holdout, train_items_holdout, validation_data, model_params
+        )
+        
+        print(f"模型: {model_name}")
+        print(f"  准确性指标:")
+        for metric in ["RMSE", "MAE"]:
+            if metric in results:
+                print(f"    {metric}: {results[metric]:.4f}")
+        
+        print(f"  性能指标:")
+        print(f"    训练时间: {results.get('training_time', 0):.2f}秒")
+        print(f"    内存消耗: {results.get('memory_usage', 0):.2f}MB (初始:{results.get('initial_memory', 0):.1f}MB -> 最大:{results.get('max_memory', 0):.1f}MB)")
+        
+        eval_results.append({
+            "model_name": model_name,
+            "metrics": results
+        })
+        
+        print("-" * 50)
     
     return eval_results
 
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description='推荐系统实验运行器')
+    
+    parser.add_argument('--mode', type=str, default='all',
+                      choices=['train', 'evaluate', 'all'],
+                      help='选择运行模式: train(训练测试), evaluate(模型评估), all(全部)')
     
     parser.add_argument('--model', type=str, default='all',
                       choices=['all', 'global_mean', 'user_mean', 'item_mean', 
@@ -160,10 +173,10 @@ def main():
         train_path=args.train_path,
         test_path=args.test_path,
         result_path=args.result_path,
-        normalize_ratings=True,  # 启用评分归一化
         cold_start_strategy="item_mean",  # 冷启动策略
         metrics=["rmse", "mae"]  # 评估指标
     )
+    
     # 根据命令行参数选择要运行的模型
     if args.model == 'all':
         models_to_run = [
@@ -174,34 +187,37 @@ def main():
     else:
         models_to_run = [get_model_config(args.model)]
     
-    # 训练和预测阶段
-    training_results = train_and_predict(config, models_to_run)
-    
-    # 评估阶段
-    evaluation_results = evaluate_models(config, training_results, models_to_run)
-    
-    # 显示实验结果摘要
-    print("\n" + "="*50)
-    print("实验结果总结")
-    print("="*50)
-    
-    for idx, result in enumerate(evaluation_results):
-        print(f"\n模型: {result['model_name']}")
-        print(f"评估指标:")
-        for metric, value in result['metrics'].items():
-            print(f"  {metric}: {value:.4f}")
+    # 根据模式选择执行的阶段
+    if args.mode in ['train', 'all']:
+        # 训练和预测阶段
+        print("执行训练测试阶段...")
+        training_results = train_and_predict(config, models_to_run)
         
-        # 显示性能指标
-        training_result = training_results[idx]
-        training_time = training_result.get('training_time', 0)
-        memory_usage = training_result.get('memory_usage', 0)
-        initial_memory = training_result.get('initial_memory', 0)
-        max_memory = training_result.get('max_memory', 0)
+        print("\n训练测试完成！")
+    
+    if args.mode in ['evaluate', 'all']:
+        # 评估阶段
+        print("执行模型评估阶段...")
+        evaluation_results = evaluate_models(config, models_to_run)
         
-        print(f"性能指标:")
-        print(f"  训练时间: {training_time:.2f}秒")
-        print(f"  内存消耗: {memory_usage:.2f}MB (初始:{initial_memory:.1f}MB -> 最大:{max_memory:.1f}MB)")
-        print("-" * 50)
+        # 显示实验结果摘要
+        print("\n" + "="*50)
+        print("实验结果总结")
+        print("="*50)
+        
+        for result in evaluation_results:
+            print(f"\n模型: {result['model_name']}")
+            metrics = result['metrics']
+            
+            print(f"准确性指标:")
+            for metric in ["RMSE", "MAE"]:
+                if metric in metrics:
+                    print(f"  {metric}: {metrics[metric]:.4f}")
+            
+            print(f"性能指标:")
+            print(f"  训练时间: {metrics.get('training_time', 0):.2f}秒")
+            print(f"  内存消耗: {metrics.get('memory_usage', 0):.2f}MB (初始:{metrics.get('initial_memory', 0):.1f}MB -> 最大:{metrics.get('max_memory', 0):.1f}MB)")
+            print("-" * 50)
 
 if __name__ == "__main__":
     main()
