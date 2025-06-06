@@ -29,15 +29,40 @@ def evaluate_models(config, results, models_to_run):
     
     evaluator = Evaluator(config)
     
-    # 划分一部分训练数据作为验证集(10%)
+    # 划分一部分训练数据作为验证集(10%)并从训练集中移除这部分数据
     np.random.seed(config.random_seed)
     validation_data = []
+    train_users_holdout = {user_id: [] for user_id in train_users}
+    
     for user_id, ratings in train_users.items():
         if len(ratings) > 10:  # 确保用户有足够的评分数据
+            # 随机选择10%的数据作为验证集
             validation_indices = np.random.choice(len(ratings), max(1, int(len(ratings) * 0.1)), replace=False)
+            validation_indices_set = set(validation_indices)
+            
+            # 将选中的数据加入验证集
             for idx in validation_indices:
                 item_id, rating = ratings[idx]
                 validation_data.append((user_id, item_id, rating))
+            
+            # 将剩余的数据保留在训练集中
+            for idx in range(len(ratings)):
+                if idx not in validation_indices_set:
+                    train_users_holdout[user_id].append(ratings[idx])
+        else:
+            # 如果用户评分较少，全部保留在训练集中
+            train_users_holdout[user_id] = ratings.copy()
+    
+    # 重新构建物品-用户评分字典
+    train_items_holdout = {}
+    for user_id, ratings in train_users_holdout.items():
+        for item_id, rating in ratings:
+            if item_id not in train_items_holdout:
+                train_items_holdout[item_id] = []
+            train_items_holdout[item_id].append((user_id, rating))
+    
+    print(f"创建了验证集: {len(validation_data)}条评分")
+    print(f"保留训练集: {sum(len(ratings) for ratings in train_users_holdout.values())}条评分")
     
     print("\n验证集评估结果:")
     eval_results = []
@@ -46,9 +71,9 @@ def evaluate_models(config, results, models_to_run):
         model_name = result['model_name']
         for model_config in models_to_run:
             if model_config["class"].__name__ == model_name:
-                # 创建并训练模型
+                # 创建并在"留出"的训练集上训练模型
                 model = model_config["class"](config, **(model_config.get("params", {})))
-                model.fit(train_users, train_items)
+                model.fit(train_users_holdout, train_items_holdout)
                 
                 # 在验证集上评估
                 validation_metrics = evaluator.evaluate_model(model, validation_data)

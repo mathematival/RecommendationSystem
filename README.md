@@ -46,13 +46,15 @@ python main.py --model gbdt_lr --train_path data/my_train.txt --test_path data/m
 
 ## 参考结果
 
-| 模型 | RMSE | MAE | 训练时间(秒) |
-|------|------|-----|--------------|
-| GlobalMeanRecommender | 20.5654 | 16.2754 | 0.19 |
-| UserMeanRecommender | 18.4579 | 14.3839 | 0.19 |
-| ItemMeanRecommender | 17.3269 | 13.1534 | 0.19 |
-| BiasedBaselineRecommender | 15.8856 | 11.8685 | 0.27 |
-| GBDTLRRecommender | 14.7330 | 11.0346 | 34.94 |
-| FMRecommender | 15.9564 | 12.1132 | 17.19 |
+| 模型名称 | RMSE | MAE | 训练时间(秒) |
+|---------|------|-----|------------|
+| GlobalMeanRecommender | 20.5658 | 16.2820 | 0.19 |
+| UserMeanRecommender | 18.5947 | 14.4972 | 0.19 |
+| ItemMeanRecommender | 19.2694 | 14.8671 | 0.20 |
+| BiasedBaselineRecommender | 17.6669 | 13.4715 | 0.28 |
+| UserCFRecommender | 20.1055 | 15.4841 | 8.44 |
+| ItemCFRecommender | 18.1910 | 14.0489 | 29.60 |
+| GBDTLRRecommender | 17.7710 | 13.4026 | 34.43 |
+| FMRecommender | 17.5434 | 13.4253 | 17.97 |
 
 
