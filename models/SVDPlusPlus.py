@@ -17,11 +17,12 @@ class SVDPlusPlusNet(nn.Module):
     
     使用PyTorch构建的矩阵分解模型，包含用户和物品的嵌入层、偏置项以及隐式反馈
     SVD++公式: r_ui = μ + b_u + b_i + q_i^T * (p_u + |N(u)|^(-0.5) * Σ_{j∈N(u)} y_j)
+    其中 N(u) 表示用户u评价过的物品集合
     """
     
     def __init__(self, num_users: int, num_items: int, latent_factors: int = 50, 
                  user_id_map: Dict = None, item_id_map: Dict = None,
-                 user_items: Dict = None):
+                 user_items: Dict = None, device: str = 'cpu'):
         super(SVDPlusPlusNet, self).__init__()
         
         self.num_users = num_users
@@ -30,6 +31,7 @@ class SVDPlusPlusNet(nn.Module):
         self.user_id_map = user_id_map or {}
         self.item_id_map = item_id_map or {}
         self.user_items = user_items or {}
+        self.device = device
         
         # 用户和物品嵌入层
         self.user_embedding = nn.Embedding(num_users, latent_factors)
@@ -45,6 +47,9 @@ class SVDPlusPlusNet(nn.Module):
         # 全局偏置
         self.global_bias = nn.Parameter(torch.zeros(1))
         
+        # 预计算用户隐式反馈向量
+        self.user_implicit_cache = {}
+        
         # 初始化参数
         self._init_weights()
         
@@ -59,53 +64,64 @@ class SVDPlusPlusNet(nn.Module):
         # 偏置初始化为0
         nn.init.zeros_(self.user_bias.weight)
         nn.init.zeros_(self.item_bias.weight)
+    
+    def precompute_user_implicit_vectors(self):
+        """预计算所有用户的隐式反馈向量以提高效率"""
+        print("预计算用户隐式反馈向量...")
+        self.user_implicit_cache = {}
         
-    def forward(self, user_ids: torch.Tensor, item_ids: torch.Tensor, 
-                user_items_list: List[List[int]] = None) -> torch.Tensor:
-        """
-        前向传播
+        with torch.no_grad():
+            for original_user_id, item_set in self.user_items.items():
+                if original_user_id in self.user_id_map:
+                    user_idx = self.user_id_map[original_user_id]
+                    
+                    if item_set:
+                        # 转换物品ID为索引
+                        item_indices = [self.item_id_map.get(item_id, 0) for item_id in item_set]
+                        item_indices = [idx for idx in item_indices if idx < self.num_items]
+                        
+                        if item_indices:
+                            item_tensor = torch.tensor(item_indices, dtype=torch.long, device=self.device)
+                            implicit_vectors = self.implicit_feedback(item_tensor)
+                            
+                            # 计算归一化系数和累加向量
+                            norm_factor = 1.0 / math.sqrt(len(item_indices))
+                            implicit_sum = norm_factor * implicit_vectors.sum(dim=0)
+                            
+                            self.user_implicit_cache[user_idx] = implicit_sum
+                        else:
+                            self.user_implicit_cache[user_idx] = torch.zeros(self.latent_factors, device=self.device)
+                    else:
+                        self.user_implicit_cache[user_idx] = torch.zeros(self.latent_factors, device=self.device)
         
-        Args:
-            user_ids: 用户ID张量 [batch_size]
-            item_ids: 物品ID张量 [batch_size]
-            user_items_list: 每个用户的历史交互物品列表
-            
-        Returns:
-            predictions: 预测评分 [batch_size]
-        """
+        print(f"完成 {len(self.user_implicit_cache)} 个用户的隐式反馈向量预计算")
+        
+    def forward(self, user_ids: torch.Tensor, item_ids: torch.Tensor) -> torch.Tensor:
+        """前向传播"""
+        batch_size = user_ids.size(0)
+        
         # 获取嵌入向量
         user_embed = self.user_embedding(user_ids)  # [batch_size, latent_factors]
         item_embed = self.item_embedding(item_ids)  # [batch_size, latent_factors]
         
         # 获取偏置
-        user_bias = self.user_bias(user_ids).squeeze()  # [batch_size]
-        item_bias = self.item_bias(item_ids).squeeze()  # [batch_size]
+        user_bias = self.user_bias(user_ids).squeeze(-1)  # [batch_size]
+        item_bias = self.item_bias(item_ids).squeeze(-1)  # [batch_size]
         
-        # SVD++核心：计算隐式反馈
-        if user_items_list is not None:
-            device = user_embed.device
-            implicit_sum = torch.zeros_like(user_embed)  # [batch_size, latent_factors]
-            
-            for i, user_item_list in enumerate(user_items_list):
-                if user_item_list:
-                    # 获取用户历史交互物品的隐式反馈向量
-                    item_indices = torch.tensor(user_item_list, dtype=torch.long, device=device)
-                    implicit_vectors = self.implicit_feedback(item_indices)  # [num_items, latent_factors]
-                    
-                    # 计算归一化系数 |N(u)|^(-0.5)
-                    norm_factor = 1.0 / math.sqrt(len(user_item_list))
-                    
-                    # 累加隐式反馈向量
-                    implicit_sum[i] = norm_factor * implicit_vectors.sum(dim=0)
-            
-            # 增强用户嵌入：p_u + |N(u)|^(-0.5) * Σ_{j∈N(u)} y_j
-            enhanced_user_embed = user_embed + implicit_sum
-        else:
-            enhanced_user_embed = user_embed
+        # 获取预计算的隐式反馈向量
+        implicit_sum = torch.zeros(batch_size, self.latent_factors, device=self.device)
+        
+        for i, user_idx in enumerate(user_ids.cpu().numpy()):
+            if user_idx in self.user_implicit_cache:
+                implicit_sum[i] = self.user_implicit_cache[user_idx]
+        
+        # 增强用户嵌入：p_u + |N(u)|^(-0.5) * Σ_{j∈N(u)} y_j
+        enhanced_user_embed = user_embed + implicit_sum
         
         # 计算点积
         dot_product = (enhanced_user_embed * item_embed).sum(dim=1)  # [batch_size]
-          # 计算最终预测：μ + b_u + b_i + q_i^T * (p_u + |N(u)|^(-0.5) * Σ_{j∈N(u)} y_j)
+        
+        # 计算最终预测：μ + b_u + b_i + q_i^T * (p_u + |N(u)|^(-0.5) * Σ_{j∈N(u)} y_j)
         predictions = self.global_bias + user_bias + item_bias + dot_product
         
         return predictions
@@ -118,20 +134,11 @@ class SVDPlusPlusNet(nn.Module):
             user_idx = self.user_id_map.get(user_id, 0)
             item_idx = self.item_id_map.get(item_id, 0)
             
-            # 创建tensors并移动到正确的设备
-            device = next(self.parameters()).device
-            user_tensor = torch.tensor([user_idx], dtype=torch.long, device=device)
-            item_tensor = torch.tensor([item_idx], dtype=torch.long, device=device)
+            # 创建tensors
+            user_tensor = torch.tensor([user_idx], dtype=torch.long, device=self.device)
+            item_tensor = torch.tensor([item_idx], dtype=torch.long, device=self.device)
             
-            # 获取用户历史交互物品列表
-            user_items_list = None
-            if user_id in self.user_items:
-                user_item_ids = list(self.user_items[user_id])
-                # 将原始物品ID转换为索引
-                user_item_indices = [self.item_id_map.get(iid, 0) for iid in user_item_ids]
-                user_items_list = [user_item_indices]
-            
-            prediction = self.forward(user_tensor, item_tensor, user_items_list)
+            prediction = self.forward(user_tensor, item_tensor)
             return prediction.item()
 
 
@@ -144,10 +151,10 @@ class SVDPlusPlusRecommender(BaseRecommender):
     """
     
     def __init__(self, config: ExperimentConfig,
-                 latent_factors: int = 100,
+                 latent_factors: int = 150,
                  learning_rate: float = 0.001,
                  regularization: float = 0.01,
-                 max_epochs: int = 1000,
+                 max_epochs: int = 200,
                  batch_size: int = 1024,
                  early_stopping_patience: int = 10,
                  device: str = None):
@@ -176,12 +183,13 @@ class SVDPlusPlusRecommender(BaseRecommender):
         
         # 训练记录
         self.training_losses = []
-        self.validation_losses = []
         
         # 设置随机种子
         torch.manual_seed(config.random_seed)
         np.random.seed(config.random_seed)
         random.seed(config.random_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(config.random_seed)
         
     def _create_id_mappings(self):
         """创建用户和物品ID到连续索引的映射"""
@@ -203,19 +211,29 @@ class SVDPlusPlusRecommender(BaseRecommender):
         
         for user_id, user_ratings in self.train_users.items():
             for item_id, rating in user_ratings:
-                user_ids.append(self.user_id_map[user_id])
-                item_ids.append(self.item_id_map[item_id])
-                ratings.append(rating)
+                if user_id in self.user_id_map and item_id in self.item_id_map:
+                    user_ids.append(self.user_id_map[user_id])
+                    item_ids.append(self.item_id_map[item_id])
+                    ratings.append(rating)
         
-        return (torch.tensor(user_ids, dtype=torch.long),
-                torch.tensor(item_ids, dtype=torch.long),
-                torch.tensor(ratings, dtype=torch.float32))
+        # 首先创建CPU张量，然后移动到指定设备
+        user_tensor = torch.tensor(user_ids, dtype=torch.long)
+        item_tensor = torch.tensor(item_ids, dtype=torch.long)
+        rating_tensor = torch.tensor(ratings, dtype=torch.float32)
+        
+        # 移动到指定设备
+        return (user_tensor.to(self.device),
+                item_tensor.to(self.device),
+                rating_tensor.to(self.device))
     
     def _create_data_loader(self, user_ids, item_ids, ratings, shuffle=True):
         """创建数据加载器"""
         dataset = torch.utils.data.TensorDataset(user_ids, item_ids, ratings)
         return torch.utils.data.DataLoader(
-            dataset, batch_size=self.batch_size, shuffle=shuffle
+            dataset, 
+            batch_size=self.batch_size, 
+            shuffle=shuffle,
+            pin_memory=False  # 改为False，因为数据已经在GPU上
         )
     
     def _create_user_items_dict(self):
@@ -243,23 +261,30 @@ class SVDPlusPlusRecommender(BaseRecommender):
         # 创建模型
         num_users = len(self.user_id_map)
         num_items = len(self.item_id_map)
+        user_items_dict = self._create_user_items_dict()
+        
         self.model = SVDPlusPlusNet(
             num_users=num_users,
             num_items=num_items,
             latent_factors=self.latent_factors,
             user_id_map=self.user_id_map,
             item_id_map=self.item_id_map,
-            user_items=self._create_user_items_dict()
+            user_items=user_items_dict,
+            device=self.device
         ).to(self.device)
         
         print(f"用户数量: {num_users}, 物品数量: {num_items}")
         
+        # 设置全局偏置为全局平均值
+        with torch.no_grad():
+            self.model.global_bias.data = torch.tensor([self.global_mean], dtype=torch.float32, device=self.device)
+        
+        # 预计算用户隐式反馈向量
+        self.model.precompute_user_implicit_vectors()
+        
         # 准备训练数据
         user_ids, item_ids, ratings = self._prepare_training_data()
         print(f"训练样本数量: {len(user_ids)}")
-          # 设置全局偏置为全局平均值
-        with torch.no_grad():
-            self.model.global_bias.data = torch.tensor([self.global_mean], dtype=torch.float32, device=self.device)
         
         # 创建数据加载器
         train_loader = self._create_data_loader(user_ids, item_ids, ratings)
@@ -275,33 +300,19 @@ class SVDPlusPlusRecommender(BaseRecommender):
         
         # 早停机制
         best_loss = float('inf')
-        patience_counter = 0        # 训练循环
+        patience_counter = 0
+        
+        # 训练循环
         self.model.train()
-        for epoch in range(self.max_epochs):
+        progress_bar = tqdm(range(self.max_epochs), desc="训练进度")
+        
+        for epoch in progress_bar:
             epoch_loss = 0.0
             num_batches = 0
             
             for batch_users, batch_items, batch_ratings in train_loader:
-                # 移动到设备
-                batch_users = batch_users.to(self.device)
-                batch_items = batch_items.to(self.device)
-                batch_ratings = batch_ratings.to(self.device)
-                
-                # 为SVD++准备用户历史交互物品列表
-                user_items_list = []
-                for user_idx in batch_users.cpu().numpy():
-                    # 从索引映射回原始用户ID
-                    original_user_id = self.reverse_user_map[user_idx]
-                    if original_user_id in self.model.user_items:
-                        # 获取用户历史交互物品，并转换为索引
-                        user_item_ids = list(self.model.user_items[original_user_id])
-                        user_item_indices = [self.item_id_map.get(iid, 0) for iid in user_item_ids]
-                        user_items_list.append(user_item_indices)
-                    else:
-                        user_items_list.append([])
-                
                 # 前向传播
-                predictions = self.model(batch_users, batch_items, user_items_list)
+                predictions = self.model(batch_users, batch_items)
                 
                 # 计算损失
                 loss = criterion(predictions, batch_ratings)
@@ -309,6 +320,10 @@ class SVDPlusPlusRecommender(BaseRecommender):
                 # 反向传播
                 optimizer.zero_grad()
                 loss.backward()
+                
+                # 梯度裁剪防止梯度爆炸
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                
                 optimizer.step()
                 
                 epoch_loss += loss.item()
@@ -321,6 +336,12 @@ class SVDPlusPlusRecommender(BaseRecommender):
             # 学习率调度
             scheduler.step(avg_loss)
             
+            # 更新进度条
+            progress_bar.set_postfix({
+                'Loss': f'{avg_loss:.6f}',
+                'LR': f'{optimizer.param_groups[0]["lr"]:.6f}'
+            })
+            
             # 早停检查
             if avg_loss < best_loss:
                 best_loss = avg_loss
@@ -329,11 +350,8 @@ class SVDPlusPlusRecommender(BaseRecommender):
                 patience_counter += 1
                 
             if patience_counter >= self.early_stopping_patience:
-                print(f"早停触发，在第 {epoch+1} 轮停止训练")
+                print(f"\n早停触发，在第 {epoch+1} 轮停止训练")
                 break
-            
-            # 每轮都显示训练进度
-            print(f"Epoch {epoch+1}/{self.max_epochs}, 平均损失: {avg_loss:.6f}, 学习率: {optimizer.param_groups[0]['lr']:.6f}")
         
         print(f"\nPyTorch SVD++训练完成！最终损失: {self.training_losses[-1]:.6f}")
         
@@ -349,5 +367,4 @@ class SVDPlusPlusRecommender(BaseRecommender):
         # 冷启动情况将由父类的predict_for_user处理
         prediction = self.model.predict_single(user_id, item_id)
         
-        # 不需要进行范围限制，因为父类的predict_for_user会做这件事
         return prediction
