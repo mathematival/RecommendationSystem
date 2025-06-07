@@ -177,7 +177,6 @@ def main():
         train_path=args.train_path,
         test_path=args.test_path,
         result_path=args.result_path,
-        cold_start_strategy="item_mean",  # 冷启动策略
         metrics=["rmse", "mae"]  # 评估指标
     )
     

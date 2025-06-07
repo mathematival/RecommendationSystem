@@ -20,8 +20,7 @@ class ExperimentConfig:
                  result_filename: str = "predictions.txt",
                  rating_min: float = 10.0,
                  rating_max: float = 100.0,
-                 metrics: List[str] = ["rmse", "mae"],
-                 cold_start_strategy: str = "item_mean"):
+                 metrics: List[str] = ["rmse", "mae"]):
         
         self.random_seed = random_seed
         self.train_path = train_path
@@ -31,7 +30,6 @@ class ExperimentConfig:
         self.rating_min = rating_min
         self.rating_max = rating_max
         self.metrics = metrics
-        self.cold_start_strategy = cold_start_strategy
         
         # 设置随机种子确保结果可复现
         np.random.seed(self.random_seed)
@@ -94,27 +92,38 @@ class BaseRecommender:
     def predict_for_user(self, user_id: int, item_id: int) -> float:
         """带有冷启动处理的统一预测函数"""
         # 确保评分被限制在有效范围内
-        if user_id in self.all_users:
+        if user_id in self.all_users and item_id in self.all_items:
             # 正常预测
             pred = self.predict(user_id, item_id)
         else:
-            # 冷启动用户处理
-            if self.config.cold_start_strategy == "item_mean":
-                pred = self.item_means.get(item_id, self.global_mean)
-            elif self.config.cold_start_strategy == "global_mean":
-                pred = self.global_mean
-            elif self.config.cold_start_strategy == "popular_items":
-                # 根据物品热度推荐，热度越高评分越接近该物品平均分
-                if item_id in self.train_items:
-                    popularity = len(self.train_items[item_id])
-                    max_pop = max(len(users) for users in self.train_items.values())
-                    weight = popularity / max_pop
-                    pred = weight * self.item_means.get(item_id, self.global_mean) + (1 - weight) * self.global_mean
+            # 冷启动处理
+            # 新用户
+            if user_id not in self.all_users and item_id in self.all_items:
+                # 1. 流行度推荐（物品被评分次数最多）
+                item_popularity = {iid: len(users) for iid, users in self.train_items.items()}
+                if item_popularity:
+                    most_popular_item = max(item_popularity, key=item_popularity.get)
+                    pop_score = self.item_means.get(most_popular_item, self.global_mean)
                 else:
-                    pred = self.global_mean
+                    pop_score = self.global_mean
+                # 2. 内容推荐（如有内容特征可用，可在此扩展）
+                # 这里只用流行度分数
+                pred = pop_score
+            # 新物品
+            elif user_id in self.all_users and item_id not in self.all_items:
+                # 基于内容特征的推荐（如有内容特征可用，可在此扩展）
+                # 这里只能用用户均值
+                pred = self.user_means.get(user_id, self.global_mean)
+            # 新用户新物品
             else:
-                pred = self.global_mean
-        
+                # 结合流行度和全局均值
+                item_popularity = {iid: len(users) for iid, users in self.train_items.items()}
+                if item_popularity:
+                    most_popular_item = max(item_popularity, key=item_popularity.get)
+                    pop_score = self.item_means.get(most_popular_item, self.global_mean)
+                else:
+                    pop_score = self.global_mean
+                pred = (pop_score + self.global_mean) / 2
         # 确保预测值在评分范围内
         return max(self.config.rating_min, min(self.config.rating_max, pred))
     

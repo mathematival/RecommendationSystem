@@ -108,7 +108,7 @@ class BiasSVDRecommender(BaseRecommender):
                  latent_factors: int = 100,
                  learning_rate: float = 0.001,
                  regularization: float = 0.01,
-                 max_epochs: int = 100,
+                 max_epochs: int = 1000,
                  batch_size: int = 1024,
                  early_stopping_patience: int = 10,
                  device: str = None):
@@ -286,36 +286,10 @@ class BiasSVDRecommender(BaseRecommender):
         """预测用户对物品的评分"""
         if self.model is None:
             return self.global_mean
-        
-        # 冷启动处理
-        if user_id not in self.user_id_map or item_id not in self.item_id_map:
-            if user_id not in self.user_id_map and item_id not in self.item_id_map:
-                # 新用户新物品
-                return self.global_mean
-            elif user_id not in self.user_id_map:
-                # 新用户已知物品
-                return self.item_means.get(item_id, self.global_mean)
-            else:
-                # 已知用户新物品
-                return self.user_means.get(user_id, self.global_mean)
-        
-        # 正常预测
+            
+        # 只负责已知用户和物品的预测
+        # 冷启动情况将由父类的predict_for_user处理
         prediction = self.model.predict_single(user_id, item_id)
         
-        # 确保预测值在有效范围内
-        return max(self.config.rating_min, min(self.config.rating_max, prediction))
-    
-    def get_training_info(self):
-        """获取训练信息"""
-        return {
-            "latent_factors": self.latent_factors,
-            "learning_rate": self.learning_rate,
-            "regularization": self.regularization,
-            "epochs_trained": len(self.training_losses),
-            "final_loss": self.training_losses[-1] if self.training_losses else None,
-            "global_mean": self.global_mean,
-            "num_users": len(self.user_id_map),
-            "num_items": len(self.item_id_map),
-            "device": str(self.device),
-            "version": "PyTorch"
-        }
+        # 不需要进行范围限制，因为父类的predict_for_user会做这件事
+        return prediction

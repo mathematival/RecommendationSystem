@@ -72,15 +72,16 @@ python main.py --mode all --model gbdt_lr --train_path ./data/train.txt --test_p
 
 ## 参考结果
 
-| 模型名称 | RMSE | MAE | 训练时间(秒) |
-|---------|------|-----|------------|
-| GlobalMeanRecommender | 20.5658 | 16.2820 | 0.06 |
-| UserMeanRecommender | 18.5947 | 14.4972 | 0.06 |
-| ItemMeanRecommender | 19.2694 | 14.8671 | 0.06 |
-| BiasedBaselineRecommender | 17.6669 | 13.4715 | 0.12 |
-| UserCFRecommender | 18.7490 | 14.2381 | 2.30 |
-| ItemCFRecommender | 17.1911 | 13.0661 | 16.85 |
-| GBDTLRRecommender | 17.7710 | 13.4026 | 31.71 |
-| FMRecommender | 17.5434 | 13.4253 | 15.57 |
+| 模型名称                  | RMSE    | MAE     | 训练时间(秒) | 内存消耗(MB) | 初始内存(MB) | 最大内存(MB) |
+|--------------------------|---------|---------|-------------|-------------|-------------|-------------|
+| GlobalMeanRecommender    | 20.4626 | 16.2001 | 0.07        | 2.09        | 541.8       | 543.9       |
+| UserMeanRecommender      | 18.5947 | 14.4972 | 0.07        | 0.06        | 546.2       | 546.2       |
+| ItemMeanRecommender      | 19.1592 | 14.7852 | 0.06        | 0.00        | 546.2       | 546.2       |
+| BiasedBaselineRecommender| 17.6669 | 13.4715 | 0.12        | 0.00        | 547.0       | 547.0       |
+| UserCFRecommender        | 18.6357 | 14.1562 | 2.49        | 276.07      | 547.3       | 823.4       |
+| ItemCFRecommender        | 17.0674 | 12.9842 | 17.52       | 1054.65     | 604.0       | 1658.6      |
+| GBDTLRRecommender        | 17.6893 | 13.3432 | 33.08       | 57.75       | 587.9       | 645.6       |
+| FMRecommender            | 17.5162 | 13.4052 | 15.42       | 680.07      | 636.9       | 1317.0      |
+| BiasSVDRecommender       | 17.8221 | 13.8988 | 176.93      | 198.16      | 1317.1      | 1515.3      |
 
 
