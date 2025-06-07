@@ -2,33 +2,41 @@ import numpy as np
 import random
 import math
 from typing import Dict, List, Tuple
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 
 from framework import BaseRecommender, ExperimentConfig
 
 
-class BiasSVDNet(nn.Module):
+class SVDPlusPlusNet(nn.Module):
     """
-    PyTorch版本的BiasSVD神经网络模型
+    PyTorch版本的SVD++神经网络模型
     
-    使用PyTorch构建的矩阵分解模型，包含用户和物品的嵌入层以及偏置项
+    使用PyTorch构建的矩阵分解模型，包含用户和物品的嵌入层、偏置项以及隐式反馈
+    SVD++公式: r_ui = μ + b_u + b_i + q_i^T * (p_u + |N(u)|^(-0.5) * Σ_{j∈N(u)} y_j)
     """
     
     def __init__(self, num_users: int, num_items: int, latent_factors: int = 50, 
-                 user_id_map: Dict = None, item_id_map: Dict = None):
-        super(BiasSVDNet, self).__init__()
+                 user_id_map: Dict = None, item_id_map: Dict = None,
+                 user_items: Dict = None):
+        super(SVDPlusPlusNet, self).__init__()
         
         self.num_users = num_users
         self.num_items = num_items
         self.latent_factors = latent_factors
         self.user_id_map = user_id_map or {}
         self.item_id_map = item_id_map or {}
+        self.user_items = user_items or {}
         
         # 用户和物品嵌入层
         self.user_embedding = nn.Embedding(num_users, latent_factors)
         self.item_embedding = nn.Embedding(num_items, latent_factors)
+        
+        # SVD++特有：隐式反馈嵌入层
+        self.implicit_feedback = nn.Embedding(num_items, latent_factors)
         
         # 用户和物品偏置
         self.user_bias = nn.Embedding(num_users, 1)
@@ -39,25 +47,28 @@ class BiasSVDNet(nn.Module):
         
         # 初始化参数
         self._init_weights()
-    
+        
     def _init_weights(self):
         """初始化模型权重"""
         # 使用标准正态分布初始化嵌入层
         init_std = 0.1
         nn.init.normal_(self.user_embedding.weight, std=init_std)
         nn.init.normal_(self.item_embedding.weight, std=init_std)
+        nn.init.normal_(self.implicit_feedback.weight, std=init_std)
         
         # 偏置初始化为0
         nn.init.zeros_(self.user_bias.weight)
         nn.init.zeros_(self.item_bias.weight)
-    
-    def forward(self, user_ids: torch.Tensor, item_ids: torch.Tensor) -> torch.Tensor:
+        
+    def forward(self, user_ids: torch.Tensor, item_ids: torch.Tensor, 
+                user_items_list: List[List[int]] = None) -> torch.Tensor:
         """
         前向传播
         
         Args:
             user_ids: 用户ID张量 [batch_size]
             item_ids: 物品ID张量 [batch_size]
+            user_items_list: 每个用户的历史交互物品列表
             
         Returns:
             predictions: 预测评分 [batch_size]
@@ -70,14 +81,35 @@ class BiasSVDNet(nn.Module):
         user_bias = self.user_bias(user_ids).squeeze()  # [batch_size]
         item_bias = self.item_bias(item_ids).squeeze()  # [batch_size]
         
-        # 计算点积
-        dot_product = (user_embed * item_embed).sum(dim=1)  # [batch_size]
+        # SVD++核心：计算隐式反馈
+        if user_items_list is not None:
+            device = user_embed.device
+            implicit_sum = torch.zeros_like(user_embed)  # [batch_size, latent_factors]
+            
+            for i, user_item_list in enumerate(user_items_list):
+                if user_item_list:
+                    # 获取用户历史交互物品的隐式反馈向量
+                    item_indices = torch.tensor(user_item_list, dtype=torch.long, device=device)
+                    implicit_vectors = self.implicit_feedback(item_indices)  # [num_items, latent_factors]
+                    
+                    # 计算归一化系数 |N(u)|^(-0.5)
+                    norm_factor = 1.0 / math.sqrt(len(user_item_list))
+                    
+                    # 累加隐式反馈向量
+                    implicit_sum[i] = norm_factor * implicit_vectors.sum(dim=0)
+            
+            # 增强用户嵌入：p_u + |N(u)|^(-0.5) * Σ_{j∈N(u)} y_j
+            enhanced_user_embed = user_embed + implicit_sum
+        else:
+            enhanced_user_embed = user_embed
         
-        # 计算最终预测
+        # 计算点积
+        dot_product = (enhanced_user_embed * item_embed).sum(dim=1)  # [batch_size]
+          # 计算最终预测：μ + b_u + b_i + q_i^T * (p_u + |N(u)|^(-0.5) * Σ_{j∈N(u)} y_j)
         predictions = self.global_bias + user_bias + item_bias + dot_product
         
         return predictions
-
+    
     def predict_single(self, user_id: int, item_id: int) -> float:
         """预测单个用户-物品对的评分"""
         self.eval()
@@ -91,15 +123,24 @@ class BiasSVDNet(nn.Module):
             user_tensor = torch.tensor([user_idx], dtype=torch.long, device=device)
             item_tensor = torch.tensor([item_idx], dtype=torch.long, device=device)
             
-            prediction = self.forward(user_tensor, item_tensor)
+            # 获取用户历史交互物品列表
+            user_items_list = None
+            if user_id in self.user_items:
+                user_item_ids = list(self.user_items[user_id])
+                # 将原始物品ID转换为索引
+                user_item_indices = [self.item_id_map.get(iid, 0) for iid in user_item_ids]
+                user_items_list = [user_item_indices]
+            
+            prediction = self.forward(user_tensor, item_tensor, user_items_list)
             return prediction.item()
 
 
-class BiasSVDRecommender(BaseRecommender):
+class SVDPlusPlusRecommender(BaseRecommender):
     """
-    使用PyTorch实现的BiasSVD推荐算法
+    使用PyTorch实现的SVD++推荐算法
     
-    采用深度学习框架构建，使用均方误差损失函数和Adam优化器
+    采用深度学习框架构建，使用均方误差损失函数和Adam优化器，
+    并引入隐式反馈机制提升推荐效果
     """
     
     def __init__(self, config: ExperimentConfig,
@@ -110,7 +151,7 @@ class BiasSVDRecommender(BaseRecommender):
                  batch_size: int = 1024,
                  early_stopping_patience: int = 10,
                  device: str = None):
-        """初始化PyTorch BiasSVD推荐器"""
+        """初始化PyTorch SVD++推荐器"""
         super().__init__(config)
         
         self.latent_factors = latent_factors
@@ -177,11 +218,18 @@ class BiasSVDRecommender(BaseRecommender):
             dataset, batch_size=self.batch_size, shuffle=shuffle
         )
     
+    def _create_user_items_dict(self):
+        """创建用户历史交互物品字典，用于隐式反馈"""
+        user_items = {}
+        for user_id, ratings in self.train_users.items():
+            user_items[user_id] = {item_id for item_id, _ in ratings}
+        return user_items
+    
     def fit(self, train_users: Dict, train_items: Dict) -> None:
-        """训练PyTorch BiasSVD模型"""
+        """训练PyTorch SVD++模型"""
         super().fit(train_users, train_items)
         
-        print(f"开始训练PyTorch BiasSVD模型...")
+        print(f"开始训练PyTorch SVD++模型...")
         print(f"设备: {self.device}")
         print(f"隐向量维度: {self.latent_factors}")
         print(f"学习率: {self.learning_rate}")
@@ -195,13 +243,13 @@ class BiasSVDRecommender(BaseRecommender):
         # 创建模型
         num_users = len(self.user_id_map)
         num_items = len(self.item_id_map)
-        
-        self.model = BiasSVDNet(
+        self.model = SVDPlusPlusNet(
             num_users=num_users,
             num_items=num_items,
             latent_factors=self.latent_factors,
             user_id_map=self.user_id_map,
-            item_id_map=self.item_id_map
+            item_id_map=self.item_id_map,
+            user_items=self._create_user_items_dict()
         ).to(self.device)
         
         print(f"用户数量: {num_users}, 物品数量: {num_items}")
@@ -227,8 +275,7 @@ class BiasSVDRecommender(BaseRecommender):
         
         # 早停机制
         best_loss = float('inf')
-        patience_counter = 0
-        # 训练循环
+        patience_counter = 0        # 训练循环
         self.model.train()
         for epoch in range(self.max_epochs):
             epoch_loss = 0.0
@@ -240,8 +287,21 @@ class BiasSVDRecommender(BaseRecommender):
                 batch_items = batch_items.to(self.device)
                 batch_ratings = batch_ratings.to(self.device)
                 
+                # 为SVD++准备用户历史交互物品列表
+                user_items_list = []
+                for user_idx in batch_users.cpu().numpy():
+                    # 从索引映射回原始用户ID
+                    original_user_id = self.reverse_user_map[user_idx]
+                    if original_user_id in self.model.user_items:
+                        # 获取用户历史交互物品，并转换为索引
+                        user_item_ids = list(self.model.user_items[original_user_id])
+                        user_item_indices = [self.item_id_map.get(iid, 0) for iid in user_item_ids]
+                        user_items_list.append(user_item_indices)
+                    else:
+                        user_items_list.append([])
+                
                 # 前向传播
-                predictions = self.model(batch_users, batch_items)
+                predictions = self.model(batch_users, batch_items, user_items_list)
                 
                 # 计算损失
                 loss = criterion(predictions, batch_ratings)
@@ -275,7 +335,7 @@ class BiasSVDRecommender(BaseRecommender):
             # 每轮都显示训练进度
             print(f"Epoch {epoch+1}/{self.max_epochs}, 平均损失: {avg_loss:.6f}, 学习率: {optimizer.param_groups[0]['lr']:.6f}")
         
-        print(f"\nPyTorch BiasSVD训练完成！最终损失: {self.training_losses[-1]:.6f}")
+        print(f"\nPyTorch SVD++训练完成！最终损失: {self.training_losses[-1]:.6f}")
         
         # 设置为评估模式
         self.model.eval()

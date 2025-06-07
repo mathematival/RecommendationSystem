@@ -22,6 +22,7 @@ from models.fm import FMRecommender
 
 # 导入矩阵分解模型
 from models.bias_svd import BiasSVDRecommender
+from models.SVDPlusPlus import SVDPlusPlusRecommender
 
 # 导出所有模型，这样就可以通过 from models import * 导入所有模型
 __all__ = [
@@ -38,7 +39,7 @@ __all__ = [
     # 进阶模型
     'GBDTLRRecommender',
     'FMRecommender',
-    
-    # 矩阵分解模型
+      # 矩阵分解模型
     'BiasSVDRecommender',
+    'SVDPlusPlusRecommender',
 ]
