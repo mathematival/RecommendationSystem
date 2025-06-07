@@ -108,9 +108,9 @@ def parse_args():
     
     parser.add_argument('--model', type=str, default='all',
                       choices=['all', 'global_mean', 'user_mean', 'item_mean', 
-                              'biased_baseline', 'usercf', 'itemcf', 'gbdt_lr', 'fm'],
+                              'biased_baseline', 'usercf', 'itemcf', 'gbdt_lr', 'fm', 'bias_svd'],
                       help='选择要运行的推荐模型')
-    
+
     parser.add_argument('--train_path', type=str, default='./data/train.txt',
                       help='训练数据路径')
     
@@ -159,6 +159,10 @@ def get_model_config(model_name):
         'fm': {
             "class": FMRecommender,
             "config_override": {"result_filename": "fm_predictions.txt"}
+        },
+        'bias_svd': {
+            "class": BiasSVDRecommender,
+            "config_override": {"result_filename": "bias_svd_predictions.txt"}
         }
     }
     return model_configs.get(model_name)
@@ -182,7 +186,7 @@ def main():
         models_to_run = [
             get_model_config(model_name) 
             for model_name in ['global_mean', 'user_mean', 'item_mean', 
-                             'biased_baseline', 'usercf', 'itemcf', 'gbdt_lr'] # 从列表中移除了 'fm'
+                             'biased_baseline', 'usercf', 'itemcf', 'gbdt_lr', 'fm', 'bias_svd']
         ]
     else:
         models_to_run = [get_model_config(args.model)]

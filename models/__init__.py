@@ -20,6 +20,9 @@ from models.usercf import UserCFRecommender
 from models.gbdt_lr import GBDTLRRecommender
 from models.fm import FMRecommender
 
+# 导入矩阵分解模型
+from models.bias_svd import BiasSVDRecommender
+
 # 导出所有模型，这样就可以通过 from models import * 导入所有模型
 __all__ = [
     # 基线模型
@@ -35,4 +38,7 @@ __all__ = [
     # 进阶模型
     'GBDTLRRecommender',
     'FMRecommender',
+    
+    # 矩阵分解模型
+    'BiasSVDRecommender',
 ]
